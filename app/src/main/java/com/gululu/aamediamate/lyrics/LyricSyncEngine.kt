@@ -1,122 +1,68 @@
 package com.gululu.aamediamate.lyrics
 
-import kotlinx.coroutines.*
-import android.util.Log
+import android.os.SystemClock
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlin.math.abs
+import kotlin.math.ceil
 
+/** Synchronizes lyrics within the caller's job, using a monotonic playback clock. */
 object LyricSyncEngine {
-    private const val POSITION_POLL_INTERVAL_MS = 1_000L
     private const val DRIFT_TOLERANCE_MS = 500L
 
-    private var currentJob: Job? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     /**
-     * @param positionProvider live playback position in ms, or null when unavailable. The engine
-     * polls it while waiting for the next line and re-anchors when it drifts from the wall clock.
+     * Emits lyric lines as playback reaches them. Timestamp-only lines are instrumental gaps:
+     * they are skipped so the previous sung line stays on screen instead of reverting to the
+     * song title. [positionProvider] may return the live player position; when it disagrees with
+     * the monotonic clock by more than 500 ms the clock is re-anchored to it, so pausing or
+     * buffering does not accumulate drift.
      */
-    @Synchronized
-    fun start(
+    suspend fun sync(
         lyrics: List<LyricLine>,
         startPositionMs: Long,
         offsetMs: Long = 0L,
+        playbackSpeed: Float = 1f,
+        nowMs: () -> Long = SystemClock::elapsedRealtime,
         positionProvider: () -> Long? = { null },
         onLineChanged: (String, String?) -> Unit
-    ): Job {
-        currentJob?.cancel()
-
-        val job = scope.launch {
-            Log.d("MediaBridge", "🎤 LyricSyncEngine starting with position: ${startPositionMs}ms, offset: ${offsetMs}ms")
-
-            val clock = PlaybackClock(positionProvider, startPositionMs)
-
-            // Find the current line based on actual playback position (not offset)
-            val currentTimeSec = clock.positionMs() / 1000.0f
-            val nextLineIndex = lyrics.indexOfFirst { it.timeSec > currentTimeSec }
-                .let { if (it == -1) lyrics.size else it }
-
-            // Blank entries are gap markers, not lyrics. Show the line that is already active
-            // right away so restarting mid-gap never flashes the song title.
-            val activeText = lyrics.subList(0, nextLineIndex).lastOrNull { it.text.isNotBlank() }?.text
-            if (activeText != null) {
-                onLineChanged(activeText, nextNonBlankTextFrom(lyrics, nextLineIndex))
-            }
-
-            for (i in nextLineIndex until lyrics.size) {
-                val line = lyrics[i]
-                clock.awaitPosition((line.timeSec * 1000).toLong() + offsetMs)
-
-                // Keep the previous line visible during instrumental gaps.
-                if (line.text.isBlank()) continue
-
-                Log.d("MediaBridge", "🎤 Showing line: ${line.text}")
-                onLineChanged(line.text, nextNonBlankTextFrom(lyrics, i + 1))
-            }
-
-            Log.d("MediaBridge", "🎤 LyricSyncEngine finished all lines")
-        }
-
-        currentJob = job
-        return job
-    }
-
-    private fun nextNonBlankTextFrom(lyrics: List<LyricLine>, fromIndex: Int): String? {
-        for (i in fromIndex until lyrics.size) {
-            if (lyrics[i].text.isNotBlank()) return lyrics[i].text
-        }
-        return null
-    }
-
-    @Synchronized
-    fun stop() {
-        currentJob?.cancel()
-        currentJob = null
-        Log.d("MediaBridge", "🎤 LyricSyncEngine stopped")
-    }
-
-    /** Stops only if [job] is still the active sync, so a stale caller cannot stop a newer one. */
-    @Synchronized
-    fun stopIfCurrent(job: Job?) {
-        if (job != null && currentJob === job) {
-            stop()
-        }
-    }
-
-    fun destroy() {
-        scope.cancel()
-        Log.d("MediaBridge", "🎤 LyricSyncEngine destroyed")
-    }
-
-    /**
-     * Playback clock anchored to the real position reported by the player instead of pure wall
-     * time, so pauses, buffering and slow position reporting cannot accumulate drift.
-     */
-    private class PlaybackClock(
-        private val positionProvider: () -> Long?,
-        initialPositionMs: Long
     ) {
-        private var anchorWallMs = System.currentTimeMillis()
-        private var anchorPositionMs = initialPositionMs
+        if (lyrics.isEmpty() || !playbackSpeed.isFinite() || playbackSpeed <= 0f) return
+        var anchoredAt = nowMs()
+        var anchoredPosition = startPositionMs
+        var emitted = false
+        var lastText: String? = null
 
-        fun positionMs(): Long {
-            val now = System.currentTimeMillis()
-            val predicted = anchorPositionMs + (now - anchorWallMs)
-            val actual = positionProvider() ?: return predicted
-
-            if (abs(actual - predicted) > DRIFT_TOLERANCE_MS) {
-                anchorWallMs = now
-                anchorPositionMs = actual
+        fun rawPosition(): Long {
+            val predicted = anchoredPosition +
+                ((nowMs() - anchoredAt).coerceAtLeast(0) * playbackSpeed.toDouble()).toLong()
+            val actual = positionProvider()
+            if (actual != null && abs(actual - predicted) > DRIFT_TOLERANCE_MS) {
+                anchoredAt = nowMs()
+                anchoredPosition = actual
                 return actual
             }
             return predicted
         }
 
-        suspend fun awaitPosition(targetPositionMs: Long) {
-            while (true) {
-                val remainingMs = targetPositionMs - positionMs()
-                if (remainingMs <= 0) return
-                delay(minOf(remainingMs, POSITION_POLL_INTERVAL_MS))
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val position = rawPosition()
+            val index = lyrics.indexOfLast { it.timeSec * 1000.0 <= position - offsetMs }
+            val text = lyrics.subList(0, index + 1).lastOrNull { it.text.isNotBlank() }?.text
+            if (!emitted || text != lastText) {
+                onLineChanged(text.orEmpty(), nextNonBlankTextFrom(lyrics, index + 1))
+                lastText = text
+                emitted = true
             }
+            val next = lyrics.subList(index + 1, lyrics.size).firstOrNull { it.text.isNotBlank() } ?: return
+            val remainingMs = next.timeSec * 1000.0 + offsetMs - position
+            delay(ceil(remainingMs / playbackSpeed).toLong().coerceAtLeast(1))
         }
     }
+
+    private fun nextNonBlankTextFrom(lyrics: List<LyricLine>, fromIndex: Int): String? =
+        lyrics.subList(fromIndex.coerceAtLeast(0), lyrics.size)
+            .firstOrNull { it.text.isNotBlank() }
+            ?.text
 }

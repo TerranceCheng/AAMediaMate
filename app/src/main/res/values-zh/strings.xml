@@ -9,6 +9,8 @@
     <string name="show">查看</string>
     <string name="hide">隐藏</string>
     <string name="back">返回</string>
+    <string name="refresh">刷新</string>
+    <string name="clear">清空</string>
     <string name="simplify_chinese">繁体转简体</string>
     <string name="lyrics_romanize">歌词罗马化</string>
     <string name="language_japanese">日语</string>
@@ -62,6 +64,19 @@
     <string name="backup_restart_required_title">需要重启</string>
     <string name="backup_restart_required_message">配置已还原。请重启应用以应用所有更改。</string>
     <string name="backup_restart_app">重启应用</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_title">诊断日志</string>
+    <string name="diagnostics_privacy_note">仅保存最近的媒体和歌词诊断事件。不包含歌词正文、API Key、授权 Token 或完整响应正文。</string>
+    <string name="diagnostics_debug_enable">详细 30 分钟</string>
+    <string name="diagnostics_debug_disable">停止详细日志</string>
+    <string name="diagnostics_copy_report">复制 issue 报告</string>
+    <string name="diagnostics_report_copied">诊断报告已复制</string>
+    <string name="diagnostics_open_github">打开 GitHub</string>
+    <string name="diagnostics_levels">级别</string>
+    <string name="diagnostics_modules">模块</string>
+    <string name="diagnostics_event_count">显示 %1$d / %2$d 条事件</string>
+    <string name="diagnostics_no_details">没有详情。</string>
     
     <!-- Display Customization -->
     <string name="display_settings_title">界面个性化</string>
@@ -71,6 +86,8 @@
     <string name="show_album_name_subtitle">在艺术家行中显示专辑名称</string>
     <string name="show_next_lyric_line_title">显示下一句歌词</string>
     <string name="show_next_lyric_line_subtitle">在艺术家行显示下一句歌词</string>
+    <string name="show_source_app_title">显示来源应用</string>
+    <string name="show_source_app_subtitle">在车载屏幕上显示“From [应用]”</string>
 
     <!-- Main Screen -->
     <string name="app_title">AA Media Mate</string>
@@ -140,11 +157,9 @@
     <string name="setup_guidance">设置指南</string>
     <string name="setup_guidance_url">https://github.com/gululu1235/AAMediaMate?tab=readme-ov-file#%EF%B8%8F-%E6%AD%8C%E8%AF%8D%E8%AE%BE%E7%BD%AE</string>
     
-    <!--Placeholder-->
-    <string name="no_media_apps_found">未找到媒体应用</string>
-    <string name="permission_required_title">需要权限</string>
-    <string name="permission_required_subtitle">请在手机上开启通知访问权限</string>
-    <string name="start_playing_music">请在手机上播放媒体</string>
+    <!-- Android Auto errors -->
+    <string name="notification_access_required_car">需要通知访问权限。请仅在确保安全时于手机上开启该权限。</string>
+    <string name="no_active_media_car">未找到正在活动的媒体。请仅在确保安全时于手机上开始播放。</string>
     
     <!--Lyrics Providers-->
     <string name="lyrics_settings_title">歌词设置</string>

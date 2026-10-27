@@ -1,46 +1,51 @@
 package com.gululu.aamediamate
 
 import android.app.Notification
-import android.os.Handler
-import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.gululu.aamediamate.diagnostics.DiagnosticLogger
+import com.gululu.aamediamate.diagnostics.DiagnosticModule
 
 class MediaNotificationListener : NotificationListenerService() {
-    private val syncHandler = Handler(Looper.getMainLooper())
-    private val SYNC_DELAY = 1000L
-    private var syncScheduled = false
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        MediaBridgeSessionManager.requestRefresh("Notification listener connected")
+    }
+
+    override fun onListenerDisconnected() {
+        MediaBridgeSessionManager.updateFromMediaInfo(null)
+        super.onListenerDisconnected()
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.notification.category != Notification.CATEGORY_TRANSPORT) return
 
         val packageName = sbn.packageName
         Log.d("MediaBridge", "📥 Media Notification from $packageName")
+        DiagnosticLogger.info(
+            this,
+            DiagnosticModule.MEDIA,
+            "Media notification posted",
+            mapOf("package" to packageName)
+        )
 
         sync()
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        if (sbn.notification.category != Notification.CATEGORY_TRANSPORT) return
+        DiagnosticLogger.debug(
+            this,
+            DiagnosticModule.MEDIA,
+            "Media notification removed",
+            mapOf("package" to sbn.packageName)
+        )
         sync()
     }
 
-    private fun sync() {
-        // Apps that refresh their notification faster than SYNC_DELAY must not keep
-        // pushing the sync out forever, otherwise a track change may never be picked up.
-        if (syncScheduled) return
-        syncScheduled = true
-        syncHandler.postDelayed(syncRunnable, SYNC_DELAY)
-    }
-
-    private val syncRunnable = Runnable {
-        syncScheduled = false
-        MediaBridgeSessionManager.updateFromMediaInfo(MediaInformationRetriever.refreshCurrentMediaInfo(this))
-        MediaBridgeService.refreshBrowserData()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        syncHandler.removeCallbacks(syncRunnable)
+    private fun sync()
+    {
+        MediaBridgeSessionManager.requestRefresh("Media notification changed", 250L)
     }
 }

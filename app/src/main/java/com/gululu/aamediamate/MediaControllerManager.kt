@@ -4,17 +4,31 @@ import android.content.ComponentName
 import android.content.Context
 import android.media.session.MediaController
 import android.media.session.PlaybackState
+import com.gululu.aamediamate.diagnostics.DiagnosticLogger
+import com.gululu.aamediamate.diagnostics.DiagnosticModule
 
 object MediaControllerManager {
     fun getAllControllers(context: Context): List<MediaController> {
         return try {
             val sessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
             val component = ComponentName(context, MediaNotificationListener::class.java)
-            sessionManager.getActiveSessions(component)
+            val controllers = sessionManager.getActiveSessions(component)
                 .filter { it.packageName != context.packageName && Global.packageAllowed(context, it.packageName) }
+            DiagnosticLogger.debug(
+                context,
+                DiagnosticModule.MEDIA,
+                "Active media controllers queried",
+                mapOf("count" to controllers.size, "packages" to controllers.joinToString(",") { it.packageName })
+            )
+            controllers
         } catch (e: Exception) {
             // Likely SecurityException due to missing notification access
-            e.printStackTrace()
+            DiagnosticLogger.error(
+                context,
+                DiagnosticModule.MEDIA,
+                "Failed to query active media controllers",
+                throwable = e
+            )
             emptyList()
         }
     }

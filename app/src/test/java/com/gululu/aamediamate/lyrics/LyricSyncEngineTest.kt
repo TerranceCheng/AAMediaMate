@@ -1,132 +1,105 @@
 package com.gululu.aamediamate.lyrics
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
+import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
-@ExperimentalCoroutinesApi
-@RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class LyricSyncEngineTest {
+    private val lyrics = listOf(LyricLine(0f, "First"), LyricLine(10f, "Second"), LyricLine(20f, "Third"))
 
-    @After
-    fun tearDown() {
-        LyricSyncEngine.stop()
-    }
-
-    @Test
-    fun `start should immediately trigger first line if position is zero`() = runTest {
-        val lyrics = listOf(LyricLine(0.01f, "First line"), LyricLine(5.0f, "Second line"))
+    @Test fun `middle starts with current line and waits for next`() = runTest {
         val lines = mutableListOf<String>()
-
-        LyricSyncEngine.start(lyrics, 0L, 0L) { current, next -> lines.add(current) }
-
-        Thread.sleep(200)
-        assertTrue(lines.contains("First line"))
+        backgroundScope.launch { LyricSyncEngine.sync(lyrics, 15_000, nowMs = { testScheduler.currentTime }) { line, _ -> lines += line } }
+        runCurrent()
+        assertEquals(listOf("Second"), lines)
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(listOf("Second", "Third"), lines)
     }
 
-    @Test
-    fun `start should trigger correct line when starting from middle`() = runTest {
-        val lyrics = listOf(
-            LyricLine(0.01f, "First line"),
-            LyricLine(0.02f, "Second line"),
-            LyricLine(0.03f, "Third line")
-        )
+    @Test fun `past last line emits last line only`() = runTest {
         val lines = mutableListOf<String>()
-
-        LyricSyncEngine.start(lyrics, 15L, 0L) { current, next -> lines.add(current) }
-
-        Thread.sleep(200)
-        assertTrue(lines.contains("Second line"))
+        LyricSyncEngine.sync(lyrics, 30_000, nowMs = { testScheduler.currentTime }) { line, _ -> lines += line }
+        assertEquals(listOf("Third"), lines)
     }
 
-    @Test
-    fun `stop should cancel the running job`() = runTest {
-        val lyrics = listOf(LyricLine(0.0f, "Line 1"), LyricLine(10.0f, "Line 2"))
-        LyricSyncEngine.start(lyrics, 0L, 0L) { _, _ -> }
-        LyricSyncEngine.stop()
-        // How to assert that the job is cancelled is a bit tricky in this setup
-        // but we can at least ensure it doesn't crash.
-    }
-
-    @Test
-    fun `blank lines keep the previous lyric visible instead of clearing it`() = runTest {
-        val lyrics = listOf(
-            LyricLine(0.0f, "First line"),
-            LyricLine(0.05f, ""),
-            LyricLine(0.1f, "Second line")
-        )
+    @Test fun `cancellation prevents later metadata updates`() = runTest {
         val lines = mutableListOf<String>()
-
-        LyricSyncEngine.start(lyrics, 0L, 0L) { current, _ -> lines.add(current) }
-
-        Thread.sleep(300)
-        assertFalse(lines.contains(""))
-        assertEquals("Second line", lines.last())
+        val job = launch { LyricSyncEngine.sync(lyrics, 0, nowMs = { testScheduler.currentTime }) { line, _ -> lines += line } }
+        runCurrent()
+        job.cancel()
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(listOf("First"), lines)
+        assertTrue(job.isCancelled)
     }
 
-    @Test
-    fun `starting inside a gap shows the active line immediately`() = runTest {
-        val lyrics = listOf(
-            LyricLine(0.0f, "First line"),
-            LyricLine(10.0f, "Second line")
-        )
+    @Test fun `speed and offset apply to initial selection and subsequent timing`() = runTest {
         val lines = mutableListOf<String>()
-
-        LyricSyncEngine.start(lyrics, 2000L, 0L) { current, _ -> lines.add(current) }
-
-        Thread.sleep(100)
-        assertEquals(listOf("First line"), lines)
+        backgroundScope.launch {
+            LyricSyncEngine.sync(lyrics, 10_000, offsetMs = 2_000, playbackSpeed = 2f, nowMs = { testScheduler.currentTime }) { line, _ -> lines += line }
+        }
+        runCurrent()
+        assertEquals(listOf("First"), lines)
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("First", "Second"), lines)
     }
 
-    @Test
-    fun `next line preview skips blank entries`() = runTest {
-        val lyrics = listOf(
-            LyricLine(0.0f, "First line"),
-            LyricLine(0.05f, ""),
-            LyricLine(0.1f, "Second line")
-        )
+    private val gappedLyrics = listOf(
+        LyricLine(0f, "First"),
+        LyricLine(10f, ""),
+        LyricLine(12f, ""),
+        LyricLine(20f, "Second")
+    )
+
+    @Test fun `blank timestamp lines keep previous line visible`() = runTest {
+        val lines = mutableListOf<String>()
+        backgroundScope.launch { LyricSyncEngine.sync(gappedLyrics, 0, nowMs = { testScheduler.currentTime }) { line, _ -> lines += line } }
+        runCurrent()
+        advanceTimeBy(11_000)
+        runCurrent()
+        assertEquals(listOf("First"), lines)
+        advanceTimeBy(9_000)
+        runCurrent()
+        assertEquals(listOf("First", "Second"), lines)
+    }
+
+    @Test fun `start inside blank gap shows last sung line`() = runTest {
+        val lines = mutableListOf<String>()
+        backgroundScope.launch { LyricSyncEngine.sync(gappedLyrics, 15_000, nowMs = { testScheduler.currentTime }) { line, _ -> lines += line } }
+        runCurrent()
+        assertEquals(listOf("First"), lines)
+    }
+
+    @Test fun `next line preview skips blank lines`() = runTest {
         val nextLines = mutableListOf<String?>()
-
-        LyricSyncEngine.start(lyrics, 0L, 0L) { _, next -> nextLines.add(next) }
-
-        Thread.sleep(300)
-        assertEquals("Second line", nextLines.first())
+        backgroundScope.launch { LyricSyncEngine.sync(gappedLyrics, 0, nowMs = { testScheduler.currentTime }) { _, next -> nextLines += next } }
+        runCurrent()
+        assertEquals(listOf("Second"), nextLines)
     }
 
-    @Test
-    fun `engine polls the live position while waiting for the next line`() = runTest {
-        val lyrics = listOf(LyricLine(0.0f, "Line 1"), LyricLine(60.0f, "Line 2"))
-        var polls = 0
-
-        LyricSyncEngine.start(lyrics, 0L, 0L, positionProvider = {
-            polls++
-            0L
-        }) { _, _ -> }
-
-        Thread.sleep(1_500)
-        assertTrue(polls >= 2)
-    }
-
-    @Test
-    fun `engine re-anchors when the playback position jumps ahead`() = runTest {
-        val lyrics = listOf(LyricLine(0.0f, "Line 1"), LyricLine(10.0f, "Line 2"))
+    @Test fun `engine re-anchors to live position when drift exceeds tolerance`() = runTest {
         val lines = mutableListOf<String>()
-        var positionJumped = false
-
-        LyricSyncEngine.start(lyrics, 0L, 0L, positionProvider = {
-            if (positionJumped) 20_000L else 0L
-        }) { current, _ -> lines.add(current) }
-
-        Thread.sleep(300)
-        positionJumped = true
-        Thread.sleep(1_500)
-
-        assertTrue(lines.contains("Line 2"))
+        var livePosition: Long? = null
+        backgroundScope.launch {
+            LyricSyncEngine.sync(
+                lyrics,
+                0,
+                nowMs = { testScheduler.currentTime },
+                positionProvider = { livePosition }
+            ) { line, _ -> lines += line }
+        }
+        runCurrent()
+        assertEquals(listOf("First"), lines)
+        livePosition = 21_000
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(listOf("First", "Third"), lines)
     }
 }

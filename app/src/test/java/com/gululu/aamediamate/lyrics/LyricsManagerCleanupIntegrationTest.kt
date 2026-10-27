@@ -5,7 +5,6 @@ import com.gululu.aamediamate.SettingsManager
 import com.gululu.aamediamate.data.LyricsCleanupField
 import com.gululu.aamediamate.data.LyricsCleanupRule
 import com.gululu.aamediamate.data.LyricsProviderConfig
-import com.gululu.aamediamate.lyrics.providers.LyricsFetchException
 import com.gululu.aamediamate.lyrics.providers.LyricsProvider
 import io.mockk.every
 import io.mockk.mockk
@@ -13,13 +12,13 @@ import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 class LyricsManagerCleanupIntegrationTest {
@@ -82,21 +81,20 @@ class LyricsManagerCleanupIntegrationTest {
             duration = "180"
         )
 
-        assertEquals("[00:01.00]Line", result.lrc)
-        assertEquals(false, result.failed)
+        assertEquals("[00:01.00]Line", result)
         assertEquals("Upbeat", capturedTitle)
         assertEquals("Green Day", capturedArtist)
     }
 
     @Test
-    fun `getLyricsLrt flags a provider failure so it can be retried`() = runTest {
+    fun `getLyricsLrt surfaces provider failures so the miss is not cached`() = runTest {
         val provider = object : LyricsProvider {
             override suspend fun getLyricsLrc(
                 context: Context,
                 title: String,
                 artist: String,
                 duration: String
-            ): String? = throw LyricsFetchException("network down")
+            ): String? = throw IOException("network down")
         }
 
         every { SettingsManager.getLyricsCleanupRules(context) } returns emptyList()
@@ -112,9 +110,9 @@ class LyricsManagerCleanupIntegrationTest {
             )
         )
 
-        val result = LyricsManager.getLyricsLrt(context, "Upbeat", "Green Day", "180")
-
-        assertNull(result.lrc)
-        assertTrue(result.failed)
+        try {
+            LyricsManager.getLyricsLrt(context, "Upbeat", "Green Day", "180")
+            fail("Expected provider failure to propagate")
+        } catch (_: IOException) { }
     }
 }

@@ -49,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,14 +66,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.lifecycleScope
 import com.gululu.aamediamate.billing.BillingManager
 import com.gululu.aamediamate.models.MediaInfo
 import com.gululu.aamediamate.ui.BackupRestoreScreen
+import com.gululu.aamediamate.ui.ArtistNameReplacementScreen
 import com.gululu.aamediamate.ui.BridgedAppsScreen
+import com.gululu.aamediamate.ui.DiagnosticLogsScreen
 import com.gululu.aamediamate.ui.DonationScreen
 import com.gululu.aamediamate.ui.LyricsCleanupRulesScreen
-import com.gululu.aamediamate.ui.ArtistNameReplacementScreen
 import com.gululu.aamediamate.ui.LyricsEditorScreen
 import com.gululu.aamediamate.ui.LyricsManagerScreen
 import com.gululu.aamediamate.ui.LyricsProvidersScreen
@@ -103,9 +104,19 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(context)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::billingManager.isInitialized) billingManager.refreshPurchases()
+    }
+
+    override fun onDestroy() {
+        if (::billingManager.isInitialized) billingManager.close()
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        billingManager = BillingManager(this, lifecycleScope)
+        billingManager = BillingManager(this)
         billingManager.startConnection()
 
         setContent {
@@ -147,18 +158,19 @@ fun applyLanguage(context: Context, language: String, country: String): Context 
 fun MediaBridgeApp(billingManager: BillingManager? = null) {
     val context = LocalContext.current
 
-    var showSettings by remember { mutableStateOf(false) }
-    var showLyricsManager by remember { mutableStateOf(false) }
-    var showLyricsSettings by remember { mutableStateOf(false) }
-    var showBridgedApps by remember { mutableStateOf(false) }
-    var showLyricsProviders by remember { mutableStateOf(false) }
-    var showLyricsCleanupRules by remember { mutableStateOf(false) }
-    var showArtistNameReplacements by remember { mutableStateOf(false) }
-    var showDisplaySettings by remember { mutableStateOf(false) }
-    var showDonationScreen by remember { mutableStateOf(false) }
-    var showBackupRestore by remember { mutableStateOf(false) }
-    var selectedLyricsKey by remember { mutableStateOf<String?>(null) }
-    var manualSearchLyricsKey by remember { mutableStateOf<String?>(null) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showLyricsManager by rememberSaveable { mutableStateOf(false) }
+    var showLyricsSettings by rememberSaveable { mutableStateOf(false) }
+    var showBridgedApps by rememberSaveable { mutableStateOf(false) }
+    var showLyricsProviders by rememberSaveable { mutableStateOf(false) }
+    var showLyricsCleanupRules by rememberSaveable { mutableStateOf(false) }
+    var showArtistNameReplacements by rememberSaveable { mutableStateOf(false) }
+    var showDisplaySettings by rememberSaveable { mutableStateOf(false) }
+    var showDonationScreen by rememberSaveable { mutableStateOf(false) }
+    var showBackupRestore by rememberSaveable { mutableStateOf(false) }
+    var showDiagnosticLogs by rememberSaveable { mutableStateOf(false) }
+    var selectedLyricsKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var manualSearchLyricsKey by rememberSaveable { mutableStateOf<String?>(null) }
     var currentMediaInfo by remember { mutableStateOf<MediaInfo?>(null) }
 
     LaunchedEffect(Unit) {
@@ -202,11 +214,13 @@ fun MediaBridgeApp(billingManager: BillingManager? = null) {
         showDisplaySettings -> com.gululu.aamediamate.ui.DisplaySettingsScreen { showDisplaySettings = false }
         showDonationScreen -> billingManager?.let { DonationScreen(billingManager = it, onBack = { showDonationScreen = false }) }
         showBackupRestore -> BackupRestoreScreen { showBackupRestore = false }
+        showDiagnosticLogs -> DiagnosticLogsScreen { showDiagnosticLogs = false }
         showSettings -> SettingsScreen(
             onBack = { showSettings = false },
             onNavigateToLyricsSettings = { showLyricsSettings = true },
             onNavigateToBridgedApps = { showBridgedApps = true },
-            onNavigateToDisplaySettings = { showDisplaySettings = true }
+            onNavigateToDisplaySettings = { showDisplaySettings = true },
+            onNavigateToDiagnosticLogs = { showDiagnosticLogs = true }
         )
         showLyricsManager -> LyricsManagerScreen(
             onBack = { showLyricsManager = false },
@@ -221,7 +235,7 @@ fun MediaBridgeApp(billingManager: BillingManager? = null) {
             onOpenDonation = { showDonationScreen = true },
             onOpenBackupRestore = { showBackupRestore = true },
             onOpenLyricsEditor = { title, artist ->
-                selectedLyricsKey = title + "_" + artist
+                selectedLyricsKey = com.gululu.aamediamate.lyrics.LyricsRepository.keyFor(title, artist)
             },
             onOpenApp = { packageName ->
                 val intent = context.packageManager.getLaunchIntentForPackage(packageName)
@@ -265,7 +279,7 @@ fun MainScreen(
         }
     }
 
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {

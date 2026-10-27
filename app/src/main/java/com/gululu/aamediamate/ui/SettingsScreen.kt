@@ -29,7 +29,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToLyricsSettings: () -> Unit = {},
     onNavigateToBridgedApps: () -> Unit = {},
-    onNavigateToDisplaySettings: () -> Unit = {}
+    onNavigateToDisplaySettings: () -> Unit = {},
+    onNavigateToDiagnosticLogs: () -> Unit = {}
 ) {
     BackHandler {
         onBack()
@@ -152,6 +153,13 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.lyrics_settings_title))
+            }
+
+            OutlinedButton(
+                onClick = onNavigateToDiagnosticLogs,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.diagnostics_title))
             }
 
         }

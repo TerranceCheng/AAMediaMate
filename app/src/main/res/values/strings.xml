@@ -9,6 +9,8 @@
     <string name="show">Show</string>
     <string name="hide">Hide</string>
     <string name="back">Back</string>
+    <string name="refresh">Refresh</string>
+    <string name="clear">Clear</string>
     <string name="simplify_chinese">Traditional to Simplified</string>
     <string name="lyrics_romanize">Romanize Lyrics</string>
     <string name="language_japanese">Japanese</string>
@@ -62,6 +64,19 @@
     <string name="backup_restart_required_title">Restart required</string>
     <string name="backup_restart_required_message">Config was restored. Restart the app to apply all changes.</string>
     <string name="backup_restart_app">Restart App</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_title">Diagnostic Logs</string>
+    <string name="diagnostics_privacy_note">Only recent media and lyrics diagnostic events are stored. Lyrics text, API keys, authorization tokens, and full response bodies are not included.</string>
+    <string name="diagnostics_debug_enable">Detailed 30m</string>
+    <string name="diagnostics_debug_disable">Stop detailed</string>
+    <string name="diagnostics_copy_report">Copy issue report</string>
+    <string name="diagnostics_report_copied">Diagnostic report copied</string>
+    <string name="diagnostics_open_github">Open GitHub</string>
+    <string name="diagnostics_levels">Levels</string>
+    <string name="diagnostics_modules">Modules</string>
+    <string name="diagnostics_event_count">%1$d of %2$d event(s)</string>
+    <string name="diagnostics_no_details">No details.</string>
     
     <!-- Display Customization -->
     <string name="display_settings_title">Display Customization</string>
@@ -71,6 +86,8 @@
     <string name="show_album_name_subtitle">Show album name in artist line</string>
     <string name="show_next_lyric_line_title">Show Next Lyric Line</string>
     <string name="show_next_lyric_line_subtitle">Display the upcoming lyric in the artist line</string>
+    <string name="show_source_app_title">Show Source App</string>
+    <string name="show_source_app_subtitle">Show “From [app]” on the car display</string>
 
     <!-- Main Screen -->
     <string name="app_title">AA Media Mate</string>
@@ -140,11 +157,9 @@
     <string name="setup_guidance">Setup Guidance</string>
     <string name="setup_guidance_url">https://github.com/gululu1235/AAMediaMate/blob/main/README_en.md#%EF%B8%8F-lyrics-configuration</string>
     
-    <!--Placeholder-->
-    <string name="no_media_apps_found">No media apps found</string>
-    <string name="permission_required_title">Permission Required</string>
-    <string name="permission_required_subtitle">Please enable notification access on phone</string>
-    <string name="start_playing_music">Play a media on the phone to control them here.</string>
+    <!-- Android Auto errors -->
+    <string name="notification_access_required_car">Notification access is required. Enable it on your phone only when it is safe to do so.</string>
+    <string name="no_active_media_car">No active media found. Start playback on your phone only when it is safe to do so.</string>
     
     <!--Lyrics Providers-->
     <string name="lyrics_settings_title">Lyrics Settings</string>

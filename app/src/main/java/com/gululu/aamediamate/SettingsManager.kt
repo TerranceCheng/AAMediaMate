@@ -29,6 +29,7 @@ object SettingsManager {
     private const val KEY_COMBINE_APP_ICON_AND_ALBUM_ART = "combine_app_icon_and_album_art"
     private const val KEY_SHOW_ALBUM_NAME = "show_album_name"
     private const val KEY_SHOW_NEXT_LYRIC_LINE = "show_next_lyric_line"
+    private const val KEY_SHOW_SOURCE_APP = "show_source_app"
     private const val KEY_LYRICS_TIMING_OFFSET = "lyrics_timing_offset"
     private const val KEY_ARTIST_NAME_REPLACEMENTS = "artist_name_replacements"
     private const val KEY_ROMANIZE_ENABLED = "lyrics_romanize_enabled"
@@ -52,6 +53,7 @@ object SettingsManager {
             put(KEY_COMBINE_APP_ICON_AND_ALBUM_ART, getCombineAppIconAndAlbumArt(context))
             put(KEY_SHOW_ALBUM_NAME, getShowAlbumName(context))
             put(KEY_SHOW_NEXT_LYRIC_LINE, getShowNextLyricLine(context))
+            put(KEY_SHOW_SOURCE_APP, getShowSourceApp(context))
             put(KEY_LYRICS_TIMING_OFFSET, getLyricsTimingOffset(context))
             put(KEY_ROMANIZE_ENABLED, getRomanizeEnabled(context))
             put(KEY_ROMANIZE_LANGUAGES, getRomanizeLanguages(context).joinToString(",") { it.name })
@@ -63,8 +65,10 @@ object SettingsManager {
         }
     }
 
-    fun importBackupSettings(context: Context, settings: JSONObject) {
-        getPrefs(context).edit {
+    fun importBackupSettings(context: Context, source: JSONObject) {
+        val settings = validateBackupSettings(source)
+        val editor = getPrefs(context).edit()
+        editor.apply {
             settings.optBooleanOrNull(KEY_LYRICS_ENABLED)?.let { putBoolean(KEY_LYRICS_ENABLED, it) }
             settings.optBooleanOrNull(KEY_SIMPLIFY)?.let { putBoolean(KEY_SIMPLIFY, it) }
             settings.optBooleanOrNull(KEY_IGNORE_NATIVE_AUTO_APPS)?.let { putBoolean(KEY_IGNORE_NATIVE_AUTO_APPS, it) }
@@ -79,13 +83,55 @@ object SettingsManager {
             }
             settings.optBooleanOrNull(KEY_SHOW_ALBUM_NAME)?.let { putBoolean(KEY_SHOW_ALBUM_NAME, it) }
             settings.optBooleanOrNull(KEY_SHOW_NEXT_LYRIC_LINE)?.let { putBoolean(KEY_SHOW_NEXT_LYRIC_LINE, it) }
+            settings.optBooleanOrNull(KEY_SHOW_SOURCE_APP)?.let { putBoolean(KEY_SHOW_SOURCE_APP, it) }
             settings.optIntOrNull(KEY_LYRICS_TIMING_OFFSET)?.let { putInt(KEY_LYRICS_TIMING_OFFSET, it) }
             settings.optBooleanOrNull(KEY_ROMANIZE_ENABLED)?.let { putBoolean(KEY_ROMANIZE_ENABLED, it) }
             settings.optStringOrNull(KEY_ROMANIZE_LANGUAGES)?.let { putString(KEY_ROMANIZE_LANGUAGES, it) }
             settings.optStringOrNull(KEY_API_KEY)?.let { putString(KEY_API_KEY, it) }
             settings.optStringOrNull(KEY_LRC_API_AUTH_TOKEN)?.let { putString(KEY_LRC_API_AUTH_TOKEN, it) }
         }
+        check(editor.commit()) { "Could not save imported settings" }
     }
+
+    internal fun backupSnapshot(context: Context): JSONObject = JSONObject(getPrefs(context).all)
+
+    internal fun restoreBackupSnapshot(context: Context, snapshot: JSONObject) {
+        val editor = getPrefs(context).edit().clear()
+        snapshot.keys().forEach { key ->
+            when (val value = snapshot.get(key)) {
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is String -> editor.putString(key, value)
+                else -> throw IllegalArgumentException("Invalid preference snapshot")
+            }
+        }
+        check(editor.commit()) { "Could not roll back settings" }
+    }
+
+    /** Rejects malformed imported settings before touching persistent data. */
+    fun validateBackupSettings(settings: JSONObject): JSONObject =
+        com.gululu.aamediamate.backup.BackupSettingsValidator.validate(settings)
+
+    fun addChangeListener(context: Context, listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) {
+        getPrefs(context).registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun removeChangeListener(context: Context, listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) {
+        getPrefs(context).unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
+    internal fun affectsPlayback(key: String?): Boolean = key != KEY_LANGUAGE
+
+    internal fun playbackSettingsSignature(context: Context): String {
+        val settings = getPrefs(context).all.toSortedMap().filterKeys { it != KEY_BRIDGED_APPS && it != KEY_LANGUAGE }
+        val apps = getBridgedApps(context).sortedBy { it.packageName }.map {
+            listOf(it.packageName, it.lyricsEnabled, it.headUnitControlEnabled, it.swapRewindFastForward)
+        }
+        return settings.toString() + apps.toString()
+    }
+
+    private fun safeArray(text: String): JSONArray = runCatching { JSONArray(text) }.getOrDefault(JSONArray())
 
     fun getCombineAppIconAndAlbumArt(context: Context): Boolean =
         getPrefs(context).getBoolean(KEY_COMBINE_APP_ICON_AND_ALBUM_ART, true)
@@ -106,6 +152,13 @@ object SettingsManager {
 
     fun setShowNextLyricLine(context: Context, enabled: Boolean) {
         getPrefs(context).edit() { putBoolean(KEY_SHOW_NEXT_LYRIC_LINE, enabled) }
+    }
+
+    fun getShowSourceApp(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_SHOW_SOURCE_APP, true)
+
+    fun setShowSourceApp(context: Context, enabled: Boolean) {
+        getPrefs(context).edit() { putBoolean(KEY_SHOW_SOURCE_APP, enabled) }
     }
 
     fun getLyricsTimingOffset(context: Context): Int =
@@ -181,7 +234,7 @@ object SettingsManager {
     }
 
     fun getIgnoreNativeAutoApps(context: Context): Boolean =
-        getPrefs(context).getBoolean(KEY_IGNORE_NATIVE_AUTO_APPS, true)
+        getPrefs(context).getBoolean(KEY_IGNORE_NATIVE_AUTO_APPS, false)
 
     fun setIgnoreNativeAutoApps(context: Context, enabled: Boolean) {
         getPrefs(context).edit() { putBoolean(KEY_IGNORE_NATIVE_AUTO_APPS, enabled) }
@@ -203,11 +256,12 @@ object SettingsManager {
     // Bridged Apps Management
     fun getBridgedApps(context: Context): List<BridgedApp> {
         val jsonString = getPrefs(context).getString(KEY_BRIDGED_APPS, "[]") ?: "[]"
-        val jsonArray = JSONArray(jsonString)
+        val jsonArray = safeArray(jsonString)
         val apps = mutableListOf<BridgedApp>()
         
         for (i in 0 until jsonArray.length()) {
-            val jsonObject = jsonArray.getJSONObject(i)
+            val jsonObject = jsonArray.optJSONObject(i) ?: continue
+            if (runCatching { com.gululu.aamediamate.backup.BackupSettingsValidator.validateEntry(KEY_BRIDGED_APPS, jsonObject) }.isFailure) continue
             val packageName = jsonObject.getString("packageName")
             if (packageName == context.packageName) continue
 
@@ -239,7 +293,7 @@ object SettingsManager {
         if (packageName == context.packageName) return null
 
         val jsonString = getPrefs(context).getString(KEY_BRIDGED_APPS, "[]") ?: "[]"
-        val jsonArray = JSONArray(jsonString)
+        val jsonArray = safeArray(jsonString)
 
         for (i in 0 until jsonArray.length()) {
             val jsonObject = jsonArray.optJSONObject(i) ?: continue
@@ -369,7 +423,7 @@ object SettingsManager {
     // Lyrics Providers Management
     fun getLyricsProviders(context: Context): List<LyricsProviderConfig> {
         val jsonString = getPrefs(context).getString(KEY_LYRICS_PROVIDERS, "[]") ?: "[]"
-        val jsonArray = JSONArray(jsonString)
+        val jsonArray = safeArray(jsonString)
         val allProviders = LyricsProviderRegistry.getAllProviders()
         val savedProviders = mutableMapOf<String, LyricsProviderConfig>()
         val savedProviderOrder = mutableMapOf<String, Int>()
@@ -377,7 +431,8 @@ object SettingsManager {
         
         // Parse saved settings
         for (i in 0 until jsonArray.length()) {
-            val jsonObject = jsonArray.getJSONObject(i)
+            val jsonObject = jsonArray.optJSONObject(i) ?: continue
+            if (runCatching { com.gululu.aamediamate.backup.BackupSettingsValidator.validateEntry(KEY_LYRICS_PROVIDERS, jsonObject) }.isFailure) continue
             val id = jsonObject.getString("id")
             val baseProvider = LyricsProviderRegistry.getProviderById(id)
             savedProviderOrder[id] = i
@@ -467,7 +522,7 @@ object SettingsManager {
         }
 
         val jsonString = prefs.getString(KEY_LYRICS_CLEANUP_RULES, "[]") ?: "[]"
-        val jsonArray = JSONArray(jsonString)
+        val jsonArray = safeArray(jsonString)
         val rules = mutableListOf<LyricsCleanupRule>()
 
         for (i in 0 until jsonArray.length()) {

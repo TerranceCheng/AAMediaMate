@@ -16,8 +16,6 @@ class MediaStateUpdater(private val context: Context) {
     }
 
     private fun updateMetadata(mediaSession: MediaSessionCompat, info: MediaInfo) {
-        val swapEnabled = SettingsManager.isAppSwapRewindFastForward(context, info.appPackageName)
-
         val artist = info.artist.takeIf { it.isNotBlank() }
         val album = info.album.takeIf { it.isNotBlank() }
 
@@ -36,9 +34,12 @@ class MediaStateUpdater(private val context: Context) {
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artistText)
         }
 
-        metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "From ${info.appName}")
+        if (SettingsManager.getShowSourceApp(context)) {
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "From ${info.appName}")
+        }
 
         info.albumArt?.let {
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it)
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
         }
 
@@ -69,7 +70,7 @@ class MediaStateUpdater(private val context: Context) {
         stateBuilder.setState(
                 if (info.isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                 info.position,
-                1.0f
+                if (info.isPlaying) info.playbackSpeed else 0.0f
             )
         mediaSession.setPlaybackState(stateBuilder.build())
     }
@@ -82,6 +83,17 @@ class MediaStateUpdater(private val context: Context) {
         )
         mediaSession.setMetadata(null)
         Log.d("MediaBridge", "Reset session states.")
+    }
+
+    internal fun showError(mediaSession: MediaSessionCompat, message: String) {
+        mediaSession.setMetadata(null)
+        mediaSession.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setState(PlaybackStateCompat.STATE_ERROR, 0L, 0.0f)
+                .setErrorMessage(PlaybackStateCompat.ERROR_CODE_APP_ERROR, message)
+                .build()
+        )
+        Log.w("MediaBridge", "Media browser error: $message")
     }
 
     private fun createRewindAction(): PlaybackStateCompat.CustomAction {

@@ -8,14 +8,14 @@ plugins {
 
 android {
     namespace = "com.gululu.aamediamate"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.gululu.aamediamate"
         minSdk = 29
-        targetSdk = 35
-        versionCode = 14
-        versionName = "1.4.0"
+        targetSdk = 36
+        versionCode = 19
+        versionName = "1.4.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -103,7 +103,7 @@ dependencies {
     implementation("com.github.houbb:opencc4j:1.6.0")
     implementation("com.github.nicolas-raoul:jakaroma:1.0.0")
     implementation(libs.androidx.runtime.livedata)
-    implementation("com.android.billingclient:billing-ktx:7.0.0")
+    implementation("com.android.billingclient:billing:9.1.0")
     testImplementation(libs.junit)
     testImplementation("io.mockk:mockk:1.13.10")
     testImplementation("org.robolectric:robolectric:4.15.1")

@@ -2,6 +2,7 @@ package com.gululu.aamediamate
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import com.gululu.aamediamate.models.MediaInfo
@@ -10,6 +11,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,9 +28,11 @@ class LyricDisplayManagerTest {
 
     @Before
     fun setUp() {
-        prefs = mockk<SharedPreferences>(relaxed = true)
+        prefs = mockk(relaxed = true)
         every { context.getSharedPreferences(any(), any()) } returns prefs
         every { prefs.getBoolean("show_album_name", true) } returns true
+        every { prefs.getBoolean("show_source_app", true) } returns true
+        every { prefs.getBoolean("show_next_lyric_line", false) } returns false
         manager = LyricDisplayManager(context)
     }
 
@@ -109,33 +113,6 @@ class LyricDisplayManagerTest {
     }
 
     @Test
-    fun `updateLyricLine shows next line in artist when enabled`() {
-        every { prefs.getBoolean("show_next_lyric_line", false) } returns true
-
-        val mediaInfo = MediaInfo(
-            title = "Song Title",
-            artist = "Artist Name",
-            album = "Album Name",
-            appName = "MusicApp",
-            appPackageName = "com.music.app",
-            duration = 1000L,
-            isPlaying = true,
-            position = 0L,
-            albumArt = null,
-            appIcon = null
-        )
-
-        invokeUpdateLyricLine(mediaInfo, "Singing lyrics...", "Next lyrics...")
-
-        val slot = slot<MediaMetadataCompat>()
-        verify { mediaSession.setMetadata(capture(slot)) }
-
-        val metadata = slot.captured
-        assertEquals("Singing lyrics...", metadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE))
-        assertEquals("Next lyrics...", metadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST))
-    }
-
-    @Test
     fun `updateLyricLine without lyrics and empty album sets correct metadata`() {
         val mediaInfo = MediaInfo(
             title = "Song Title",
@@ -165,5 +142,78 @@ class LyricDisplayManagerTest {
 
         // Verify Artist is just "Artist Name" (no trailing dash)
         assertEquals("Artist Name", metadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST))
+    }
+
+    @Test
+    fun `updateLyricLine writes artwork to art and album art metadata keys`() {
+        val albumArt = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+        val mediaInfo = MediaInfo(
+            title = "Song Title",
+            artist = "Artist Name",
+            album = "Album Name",
+            appName = "MusicApp",
+            appPackageName = "com.music.app",
+            duration = 1000L,
+            isPlaying = true,
+            position = 0L,
+            albumArt = albumArt,
+            appIcon = null
+        )
+
+        invokeUpdateLyricLine(mediaInfo, "Singing lyrics...")
+
+        val slot = slot<MediaMetadataCompat>()
+        verify { mediaSession.setMetadata(capture(slot)) }
+
+        val metadata = slot.captured
+        assertEquals(albumArt, metadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ART))
+        assertEquals(albumArt, metadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART))
+    }
+
+    @Test
+    fun `updateLyricLine omits source app when disabled`() {
+        every { prefs.getBoolean("show_source_app", true) } returns false
+        val mediaInfo = MediaInfo(
+            title = "Song Title",
+            artist = "Artist Name",
+            album = "Album Name",
+            appName = "MusicApp",
+            appPackageName = "com.music.app",
+            duration = 1000L,
+            isPlaying = true,
+            position = 0L,
+            albumArt = null,
+            appIcon = null
+        )
+
+        invokeUpdateLyricLine(mediaInfo, "Singing lyrics...")
+
+        val slot = slot<MediaMetadataCompat>()
+        verify { mediaSession.setMetadata(capture(slot)) }
+        assertNull(slot.captured.getString(MediaMetadataCompat.METADATA_KEY_ALBUM))
+    }
+
+    @Test
+    fun `updateLyricLine shows next line in artist when enabled`() {
+        every { prefs.getBoolean("show_next_lyric_line", false) } returns true
+        val mediaInfo = MediaInfo(
+            title = "Song Title",
+            artist = "Artist Name",
+            album = "Album Name",
+            appName = "MusicApp",
+            appPackageName = "com.music.app",
+            duration = 1000L,
+            isPlaying = true,
+            position = 0L,
+            albumArt = null,
+            appIcon = null
+        )
+
+        invokeUpdateLyricLine(mediaInfo, "Singing lyrics...", "Next lyrics...")
+
+        val slot = slot<MediaMetadataCompat>()
+        verify { mediaSession.setMetadata(capture(slot)) }
+        assertEquals("Singing lyrics...", slot.captured.getString(MediaMetadataCompat.METADATA_KEY_TITLE))
+        assertEquals("Next lyrics...", slot.captured.getString(MediaMetadataCompat.METADATA_KEY_ARTIST))
     }
 }
