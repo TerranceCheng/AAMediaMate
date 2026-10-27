@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.core.content.edit
 import com.gululu.aamediamate.data.LyricsCleanupField
 import com.gululu.aamediamate.data.LyricsCleanupRule
+import com.gululu.aamediamate.data.ArtistNameReplacement
 import com.gululu.aamediamate.models.LanguageOption
+import com.gululu.aamediamate.models.RomanizeLanguage
 import com.gululu.aamediamate.models.BridgedApp
 import com.gululu.aamediamate.data.LyricsProviderConfig
 import com.gululu.aamediamate.data.LyricsProviderRegistry
@@ -28,6 +30,9 @@ object SettingsManager {
     private const val KEY_SHOW_ALBUM_NAME = "show_album_name"
     private const val KEY_SHOW_NEXT_LYRIC_LINE = "show_next_lyric_line"
     private const val KEY_LYRICS_TIMING_OFFSET = "lyrics_timing_offset"
+    private const val KEY_ARTIST_NAME_REPLACEMENTS = "artist_name_replacements"
+    private const val KEY_ROMANIZE_ENABLED = "lyrics_romanize_enabled"
+    private const val KEY_ROMANIZE_LANGUAGES = "lyrics_romanize_languages"
 
     private fun getPrefs(context: Context) = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -43,10 +48,13 @@ object SettingsManager {
             put(KEY_BRIDGED_APPS, prefs.getJSONArrayString(KEY_BRIDGED_APPS))
             put(KEY_LYRICS_PROVIDERS, prefs.getJSONArrayString(KEY_LYRICS_PROVIDERS))
             put(KEY_LYRICS_CLEANUP_RULES, lyricsCleanupRulesToJson(getLyricsCleanupRules(context)))
+            put(KEY_ARTIST_NAME_REPLACEMENTS, artistNameReplacementsToJson(getArtistNameReplacements(context)))
             put(KEY_COMBINE_APP_ICON_AND_ALBUM_ART, getCombineAppIconAndAlbumArt(context))
             put(KEY_SHOW_ALBUM_NAME, getShowAlbumName(context))
             put(KEY_SHOW_NEXT_LYRIC_LINE, getShowNextLyricLine(context))
             put(KEY_LYRICS_TIMING_OFFSET, getLyricsTimingOffset(context))
+            put(KEY_ROMANIZE_ENABLED, getRomanizeEnabled(context))
+            put(KEY_ROMANIZE_LANGUAGES, getRomanizeLanguages(context).joinToString(",") { it.name })
 
             if (includeSecrets) {
                 put(KEY_API_KEY, getApiKey(context))
@@ -65,12 +73,15 @@ object SettingsManager {
             settings.optJSONArrayStringOrNull(KEY_BRIDGED_APPS)?.let { putString(KEY_BRIDGED_APPS, it) }
             settings.optJSONArrayStringOrNull(KEY_LYRICS_PROVIDERS)?.let { putString(KEY_LYRICS_PROVIDERS, it) }
             settings.optJSONArrayStringOrNull(KEY_LYRICS_CLEANUP_RULES)?.let { putString(KEY_LYRICS_CLEANUP_RULES, it) }
+            settings.optJSONArrayStringOrNull(KEY_ARTIST_NAME_REPLACEMENTS)?.let { putString(KEY_ARTIST_NAME_REPLACEMENTS, it) }
             settings.optBooleanOrNull(KEY_COMBINE_APP_ICON_AND_ALBUM_ART)?.let {
                 putBoolean(KEY_COMBINE_APP_ICON_AND_ALBUM_ART, it)
             }
             settings.optBooleanOrNull(KEY_SHOW_ALBUM_NAME)?.let { putBoolean(KEY_SHOW_ALBUM_NAME, it) }
             settings.optBooleanOrNull(KEY_SHOW_NEXT_LYRIC_LINE)?.let { putBoolean(KEY_SHOW_NEXT_LYRIC_LINE, it) }
             settings.optIntOrNull(KEY_LYRICS_TIMING_OFFSET)?.let { putInt(KEY_LYRICS_TIMING_OFFSET, it) }
+            settings.optBooleanOrNull(KEY_ROMANIZE_ENABLED)?.let { putBoolean(KEY_ROMANIZE_ENABLED, it) }
+            settings.optStringOrNull(KEY_ROMANIZE_LANGUAGES)?.let { putString(KEY_ROMANIZE_LANGUAGES, it) }
             settings.optStringOrNull(KEY_API_KEY)?.let { putString(KEY_API_KEY, it) }
             settings.optStringOrNull(KEY_LRC_API_AUTH_TOKEN)?.let { putString(KEY_LRC_API_AUTH_TOKEN, it) }
         }
@@ -146,6 +157,27 @@ object SettingsManager {
 
     fun setSimplifyEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit() { putBoolean(KEY_SIMPLIFY, enabled) }
+    }
+
+    fun getRomanizeEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_ROMANIZE_ENABLED, false)
+
+    fun setRomanizeEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit() { putBoolean(KEY_ROMANIZE_ENABLED, enabled) }
+    }
+
+    fun getRomanizeLanguages(context: Context): Set<RomanizeLanguage> {
+        val stored = getPrefs(context).getString(KEY_ROMANIZE_LANGUAGES, "") ?: ""
+        if (stored.isBlank()) return emptySet()
+        return stored.split(",").mapNotNull { name ->
+            runCatching { RomanizeLanguage.valueOf(name) }.getOrNull()
+        }.toSet()
+    }
+
+    fun setRomanizeLanguages(context: Context, languages: Set<RomanizeLanguage>) {
+        getPrefs(context).edit() {
+            putString(KEY_ROMANIZE_LANGUAGES, languages.joinToString(",") { it.name })
+        }
     }
 
     fun getIgnoreNativeAutoApps(context: Context): Boolean =
@@ -527,5 +559,58 @@ object SettingsManager {
             is String -> runCatching { JSONArray(value).toString() }.getOrNull()
             else -> null
         }
+    }
+
+    fun getArtistNameReplacements(context: Context): List<ArtistNameReplacement> {
+        val prefs = getPrefs(context)
+        val jsonString = prefs.getString(KEY_ARTIST_NAME_REPLACEMENTS, "[]") ?: "[]"
+        val jsonArray = JSONArray(jsonString)
+        val replacements = mutableListOf<ArtistNameReplacement>()
+
+        for (i in 0 until jsonArray.length()) {
+            val jsonObject = jsonArray.optJSONObject(i) ?: continue
+            replacements.add(
+                ArtistNameReplacement(
+                    id = jsonObject.optString("id", UUID.randomUUID().toString()),
+                    englishName = jsonObject.optString("englishName", ""),
+                    chineseName = jsonObject.optString("chineseName", ""),
+                    isEnabled = jsonObject.optBoolean("isEnabled", true)
+                )
+            )
+        }
+
+        return replacements
+    }
+
+    fun saveArtistNameReplacements(context: Context, replacements: List<ArtistNameReplacement>) {
+        val jsonArray = JSONArray()
+        replacements.forEach { replacement ->
+            val jsonObject = JSONObject().apply {
+                put("id", replacement.id)
+                put("englishName", replacement.englishName)
+                put("chineseName", replacement.chineseName)
+                put("isEnabled", replacement.isEnabled)
+            }
+            jsonArray.put(jsonObject)
+        }
+
+        getPrefs(context).edit {
+            putString(KEY_ARTIST_NAME_REPLACEMENTS, jsonArray.toString())
+        }
+    }
+
+    private fun artistNameReplacementsToJson(replacements: List<ArtistNameReplacement>): JSONArray {
+        val jsonArray = JSONArray()
+        replacements.forEach { replacement ->
+            jsonArray.put(
+                JSONObject().apply {
+                    put("id", replacement.id)
+                    put("englishName", replacement.englishName)
+                    put("chineseName", replacement.chineseName)
+                    put("isEnabled", replacement.isEnabled)
+                }
+            )
+        }
+        return jsonArray
     }
 }

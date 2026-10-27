@@ -2,6 +2,7 @@ package com.gululu.aamediamate.lyrics.providers
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -31,8 +32,11 @@ object LRCLibProvider : LyricsProvider {
             val response = client.newCall(request).execute()
 
             Log.d("MediaBridge", "LRCLib Response: $response")
-            if (response.code() != 200) {
+            if (response.code() == 404) {
                 return@withContext null
+            }
+            if (response.code() != 200) {
+                throw LyricsFetchException("LRCLib HTTP ${response.code()}")
             }
 
             val body = response.body()?.string()
@@ -46,9 +50,11 @@ object LRCLibProvider : LyricsProvider {
             
             // Return synced lyrics if available and not the literal string "null", otherwise null
             if (syncedLyrics.isNotBlank() && syncedLyrics != "null") syncedLyrics else null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("MediaBridge", "Error fetching lyrics from LRCLib", e)
-            null
+            throw LyricsFetchException("LRCLib request failed: ${e.message}", e)
         }
     }
 }

@@ -72,6 +72,7 @@ import com.gululu.aamediamate.ui.BackupRestoreScreen
 import com.gululu.aamediamate.ui.BridgedAppsScreen
 import com.gululu.aamediamate.ui.DonationScreen
 import com.gululu.aamediamate.ui.LyricsCleanupRulesScreen
+import com.gululu.aamediamate.ui.ArtistNameReplacementScreen
 import com.gululu.aamediamate.ui.LyricsEditorScreen
 import com.gululu.aamediamate.ui.LyricsManagerScreen
 import com.gululu.aamediamate.ui.LyricsProvidersScreen
@@ -152,6 +153,7 @@ fun MediaBridgeApp(billingManager: BillingManager? = null) {
     var showBridgedApps by remember { mutableStateOf(false) }
     var showLyricsProviders by remember { mutableStateOf(false) }
     var showLyricsCleanupRules by remember { mutableStateOf(false) }
+    var showArtistNameReplacements by remember { mutableStateOf(false) }
     var showDisplaySettings by remember { mutableStateOf(false) }
     var showDonationScreen by remember { mutableStateOf(false) }
     var showBackupRestore by remember { mutableStateOf(false) }
@@ -190,10 +192,12 @@ fun MediaBridgeApp(billingManager: BillingManager? = null) {
         showBridgedApps -> BridgedAppsScreen { showBridgedApps = false }
         showLyricsProviders -> LyricsProvidersScreen { showLyricsProviders = false }
         showLyricsCleanupRules -> LyricsCleanupRulesScreen { showLyricsCleanupRules = false }
+        showArtistNameReplacements -> ArtistNameReplacementScreen { showArtistNameReplacements = false }
         showLyricsSettings -> LyricsSettingsScreen(
             onBack = { showLyricsSettings = false },
             onNavigateToProviders = { showLyricsProviders = true },
-            onNavigateToCleanupRules = { showLyricsCleanupRules = true }
+            onNavigateToCleanupRules = { showLyricsCleanupRules = true },
+            onNavigateToArtistNameReplacements = { showArtistNameReplacements = true }
         )
         showDisplaySettings -> com.gululu.aamediamate.ui.DisplaySettingsScreen { showDisplaySettings = false }
         showDonationScreen -> billingManager?.let { DonationScreen(billingManager = it, onBack = { showDonationScreen = false }) }

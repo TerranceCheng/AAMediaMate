@@ -62,8 +62,9 @@ object LyricCache {
         }
 
         Log.d("MediaBridge", "🎤 Fetching lyrics from network...")
-        val lrcContent = LyricsManager.getLyricsLrt(context, title, artist, duration)
-        Log.d("MediaBridge", "🎤 Network fetch returned: $lrcContent")
+        val result = LyricsManager.getLyricsLrt(context, title, artist, duration)
+        Log.d("MediaBridge", "🎤 Network fetch returned: ${result.lrc} (failed=${result.failed})")
+        val lrcContent = result.lrc
         if (!lrcContent.isNullOrBlank()) {
             val lyrics = LyricsManager.parseLrc(context, lrcContent)
             Log.d("MediaBridge", "🎤 Parsed lyrics: $lyrics")
@@ -80,6 +81,10 @@ object LyricCache {
                 Log.d("MediaBridge", "🎤 Failed to parse lyrics")
                 return emptyList()
             }
+        } else if (result.failed) {
+            // Do not write the empty "no lyrics" marker: a network/HTTP failure must be retried later.
+            Log.d("MediaBridge", "🎤 Lyric fetch failed, will retry on next attempt")
+            return emptyList()
         } else {
             memoryCache[key] = null
             withContext(Dispatchers.IO) {

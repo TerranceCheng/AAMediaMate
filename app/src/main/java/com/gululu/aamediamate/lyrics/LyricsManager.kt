@@ -1,34 +1,64 @@
 package com.gululu.aamediamate.lyrics
 
 import android.content.Context
+import android.util.Log
 import com.github.houbb.opencc4j.util.ZhConverterUtil
 import com.gululu.aamediamate.SettingsManager
 import com.gululu.aamediamate.lyrics.providers.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.regex.Pattern
 
 data class LyricLine(val timeSec: Float, val text: String)
 
+/**
+ * Outcome of a lyrics lookup.
+ * [failed] is true when at least one provider could not be queried (network/HTTP error), meaning the
+ * "not found" result may be caused by an outage and should not be cached permanently.
+ */
+data class LyricsFetchResult(val lrc: String?, val failed: Boolean)
+
 object LyricsManager {
-    suspend fun getLyricsLrt(context: Context, title: String, artist: String, duration: String): String? = withContext(Dispatchers.IO) {
+    suspend fun getLyricsLrt(context: Context, title: String, artist: String, duration: String): LyricsFetchResult = withContext(Dispatchers.IO) {
         val cleanupRules = SettingsManager.getLyricsCleanupRules(context)
-        val (cleanedTitle, cleanedArtist) = LyricsCleanupManager.applyRules(title, artist, cleanupRules)
+        var (cleanedTitle, cleanedArtist) = LyricsCleanupManager.applyRules(title, artist, cleanupRules)
+        
+        // Apply artist name replacements
+        cleanedArtist = applyArtistNameReplacements(context, cleanedArtist)
 
         // Get enabled providers in order of priority
         val enabledProviders = SettingsManager.getEnabledProvidersInOrder(context)
-        
+
+        var anyProviderFailed = false
         for (providerConfig in enabledProviders) {
             try {
                 val lrc = providerConfig.provider.getLyricsLrc(context, cleanedTitle, cleanedArtist, duration)
                 if (!lrc.isNullOrBlank()) {
-                    return@withContext lrc
+                    return@withContext LyricsFetchResult(lrc, failed = false)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("MediaBridge", "Lyrics provider ${providerConfig.name} failed", e)
+                anyProviderFailed = true
             }
         }
-        return@withContext null
+        return@withContext LyricsFetchResult(null, failed = anyProviderFailed)
+    }
+
+    private fun applyArtistNameReplacements(context: Context, artist: String): String {
+        var result = artist
+        val replacements = SettingsManager.getArtistNameReplacements(context)
+        
+        replacements.filter { it.isEnabled }.forEach { replacement ->
+            if (replacement.englishName.isNotBlank() && replacement.chineseName.isNotBlank()) {
+                // Case-insensitive replacement
+                result = result.replace(Regex("(?i)${Regex.escape(replacement.englishName)}"), replacement.chineseName)
+            }
+        }
+        
+        return result
     }
 
     fun parseLrc(context: Context, lrc: String): List<LyricLine> {
@@ -47,6 +77,10 @@ object LyricsManager {
             if (lineMatcher.matches()) {
                 val tagsBlock = lineMatcher.group(1)!!
                 var text = lineMatcher.group(2)!!.trim()
+
+                // Romanize detected non-Latin languages (e.g. Japanese/Korean) into Latin text.
+                // Runs before the opencc conversion so Japanese kanji is not simplified first.
+                text = LyricRomanizer.romanize(context, text)
 
                 // Chinese character conversion
                 if (SettingsManager.getSimplifyEnabled(context)) {

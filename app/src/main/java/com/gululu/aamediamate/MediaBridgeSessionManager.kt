@@ -4,6 +4,7 @@ import android.content.Context
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import com.gululu.aamediamate.models.MediaInfo
+import java.lang.ref.WeakReference
 
 object MediaBridgeSessionManager {
     private var mediaSession: MediaSessionCompat? = null
@@ -11,13 +12,13 @@ object MediaBridgeSessionManager {
     private var lyricDisplayManager: LyricDisplayManager? = null
     private var currentMediaInfo: MediaInfo? = null
     private var mediaInfoListener: ((MediaInfo?) -> Unit)? = null
-    private var context: Context? = null
+    private var context: WeakReference<Context>? = null
 
     fun init(context: Context) {
         if (mediaSession != null) return
 
         val appContext = context.applicationContext
-        this.context = appContext
+        this.context = WeakReference(appContext)
         mediaStateUpdater = MediaStateUpdater(appContext)
         lyricDisplayManager = LyricDisplayManager(appContext)
 
@@ -37,7 +38,7 @@ object MediaBridgeSessionManager {
     fun updateFromMediaInfo(info: MediaInfo?) {
         currentMediaInfo = info
         val session = mediaSession ?: return
-        val ctx = context ?: return
+        val ctx = context?.get() ?: return
 
         if (info == null || !Global.packageAllowed(ctx, info.appPackageName)) {
             if (info != null) {
@@ -75,4 +76,20 @@ object MediaBridgeSessionManager {
 
     fun getRewindActionId(): String = MediaStateUpdater.ACTION_REWIND_10S
     fun getFastForwardActionId(): String = MediaStateUpdater.ACTION_FAST_FORWARD_10S
+
+    fun cleanup() {
+        try {
+            mediaSession?.release()
+            mediaSession = null
+            mediaStateUpdater = null
+            lyricDisplayManager?.stop()
+            lyricDisplayManager = null
+            mediaInfoListener = null
+            currentMediaInfo = null
+            context = null
+            Log.d("MediaBridge", "✅ MediaBridgeSessionManager cleaned up")
+        } catch (e: Exception) {
+            Log.e("MediaBridge", "Error during cleanup", e)
+        }
+    }
 }

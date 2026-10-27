@@ -7,6 +7,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,7 +74,7 @@ class LyricCacheTest {
         val parsedLyrics = listOf(LyricLine(2.0f, "From network"))
 
         io.mockk.mockkObject(LyricsManager)
-        coEvery { LyricsManager.getLyricsLrt(context, title, artist, duration) } returns networkLrc
+        coEvery { LyricsManager.getLyricsLrt(context, title, artist, duration) } returns LyricsFetchResult(networkLrc, failed = false)
         io.mockk.every { LyricsManager.parseLrc(context, networkLrc) } returns parsedLyrics
 
         LyricCache.clearMemoryCache(key)
@@ -81,5 +83,31 @@ class LyricCacheTest {
         val result = kotlinx.coroutines.runBlocking { LyricCache.getOrFetchLyrics(context, title, artist, duration) }
 
         assert(result == parsedLyrics)
+    }
+
+    @Test
+    fun `getOrFetchLyrics should not cache a failed fetch`() = runTest {
+        val title = "Failed Title"
+        val artist = "Failed Artist"
+        val duration = "100"
+        val key = "${title}_${artist}"
+
+        io.mockk.mockkObject(LyricsManager)
+        coEvery { LyricsManager.getLyricsLrt(context, title, artist, duration) } returns
+                LyricsFetchResult(null, failed = true)
+
+        LyricCache.clearMemoryCache(key)
+        val file = File(lyricsDir, "$key.lrt")
+        file.delete()
+
+        val first = LyricCache.getOrFetchLyrics(context, title, artist, duration)
+        val second = LyricCache.getOrFetchLyrics(context, title, artist, duration)
+
+        assertTrue(first.isEmpty())
+        assertTrue(second.isEmpty())
+        // No "no lyrics" marker file, so the next attempt hits the network again.
+        assertFalse(file.exists())
+        io.mockk.coVerify(exactly = 2) { LyricsManager.getLyricsLrt(context, title, artist, duration) }
+        io.mockk.unmockkObject(LyricsManager)
     }
 }

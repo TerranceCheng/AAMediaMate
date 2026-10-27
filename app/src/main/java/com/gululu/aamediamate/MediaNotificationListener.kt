@@ -8,6 +8,10 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 
 class MediaNotificationListener : NotificationListenerService() {
+    private val syncHandler = Handler(Looper.getMainLooper())
+    private val SYNC_DELAY = 1000L
+    private var syncScheduled = false
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.notification.category != Notification.CATEGORY_TRANSPORT) return
 
@@ -21,13 +25,22 @@ class MediaNotificationListener : NotificationListenerService() {
         sync()
     }
 
-    private fun sync()
-    {
-        Handler(Looper.getMainLooper()).postDelayed({
-            MediaBridgeSessionManager.updateFromMediaInfo(MediaInformationRetriever.refreshCurrentMediaInfo(this))
-            
-            // Directly refresh browser data
-            MediaBridgeService.refreshBrowserData()
-        }, 1000)
+    private fun sync() {
+        // Apps that refresh their notification faster than SYNC_DELAY must not keep
+        // pushing the sync out forever, otherwise a track change may never be picked up.
+        if (syncScheduled) return
+        syncScheduled = true
+        syncHandler.postDelayed(syncRunnable, SYNC_DELAY)
+    }
+
+    private val syncRunnable = Runnable {
+        syncScheduled = false
+        MediaBridgeSessionManager.updateFromMediaInfo(MediaInformationRetriever.refreshCurrentMediaInfo(this))
+        MediaBridgeService.refreshBrowserData()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        syncHandler.removeCallbacks(syncRunnable)
     }
 }

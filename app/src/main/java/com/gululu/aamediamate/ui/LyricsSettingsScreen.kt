@@ -37,12 +37,14 @@ import androidx.compose.ui.unit.dp
 import com.gululu.aamediamate.R
 import com.gululu.aamediamate.SettingsManager
 import com.gululu.aamediamate.models.LanguageOption
+import com.gululu.aamediamate.models.RomanizeLanguage
 
 @Composable
 fun LyricsSettingsScreen(
     onBack: () -> Unit,
     onNavigateToProviders: () -> Unit,
     onNavigateToCleanupRules: () -> Unit,
+    onNavigateToArtistNameReplacements: () -> Unit,
 ) {
     BackHandler {
         onBack()
@@ -51,6 +53,8 @@ fun LyricsSettingsScreen(
     val context = LocalContext.current
     var lyricsEnabled by remember { mutableStateOf(SettingsManager.getLyricsEnabled(context)) }
     var simplifyChinese by remember { mutableStateOf(SettingsManager.getSimplifyEnabled(context)) }
+    var romanizeEnabled by remember { mutableStateOf(SettingsManager.getRomanizeEnabled(context)) }
+    var romanizeLanguages by remember { mutableStateOf(SettingsManager.getRomanizeLanguages(context)) }
     var lyricsTimingOffset by remember { mutableStateOf(SettingsManager.getLyricsTimingOffset(context)) }
     var showLyricsConfirmationDialog by remember { mutableStateOf(false) }
 
@@ -117,6 +121,43 @@ fun LyricsSettingsScreen(
                 }
             }
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = stringResource(id = R.string.lyrics_romanize), modifier = Modifier.weight(1f))
+                Switch(
+                    checked = romanizeEnabled,
+                    enabled = lyricsEnabled,
+                    onCheckedChange = {
+                        romanizeEnabled = it
+                        SettingsManager.setRomanizeEnabled(context, it)
+                    }
+                )
+            }
+
+            if (romanizeEnabled) {
+                RomanizeLanguage.entries.forEach { language ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = when (language) {
+                                RomanizeLanguage.JAPANESE -> stringResource(R.string.language_japanese)
+                                RomanizeLanguage.KOREAN -> stringResource(R.string.language_korean)
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = language in romanizeLanguages,
+                            onCheckedChange = { checked ->
+                                romanizeLanguages = if (checked) {
+                                    romanizeLanguages + language
+                                } else {
+                                    romanizeLanguages - language
+                                }
+                                SettingsManager.setRomanizeLanguages(context, romanizeLanguages)
+                            }
+                        )
+                    }
+                }
+            }
+
             Text(
                 text = stringResource(R.string.lyrics_timing_offset_label, lyricsTimingOffset / 1000f),
                 style = MaterialTheme.typography.bodyMedium,
@@ -170,6 +211,14 @@ fun LyricsSettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.lyrics_cleanup_rules_title))
+            }
+
+            OutlinedButton(
+                onClick = onNavigateToArtistNameReplacements,
+                enabled = lyricsEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.artist_name_replacements_title))
             }
 
             if (showLyricsConfirmationDialog) {

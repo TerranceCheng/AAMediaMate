@@ -3,6 +3,7 @@ package com.gululu.aamediamate.lyrics.providers
 import android.content.Context
 import android.util.Log
 import com.gululu.aamediamate.SettingsManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -38,8 +39,11 @@ object SpotifyProvider : LyricsProvider {
             val response = client.newCall(request).execute()
 
             Log.d("MediaBridge", "Response: $response")
-            if (response.code() != 200) {
+            if (response.code() == 404) {
                 return@withContext null
+            }
+            if (response.code() != 200) {
+                throw LyricsFetchException("Spotify HTTP ${response.code()}")
             }
 
             val body = response.body()?.string()
@@ -66,9 +70,11 @@ object SpotifyProvider : LyricsProvider {
             }
 
             return@withContext lyricsLines.joinToString("\n").takeIf { it.isNotBlank() }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            Log.e("MediaBridge", "Error fetching lyrics from Spotify", e)
+            throw LyricsFetchException("Spotify request failed: ${e.message}", e)
         }
     }
 }

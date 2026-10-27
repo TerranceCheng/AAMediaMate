@@ -3,6 +3,7 @@ package com.gululu.aamediamate.lyrics.providers
 import android.content.Context
 import android.util.Log
 import com.gululu.aamediamate.SettingsManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -36,16 +37,21 @@ object LrcApiProvider : LyricsProvider {
             val response = client.newCall(request).execute()
             Log.d("MediaBridge", "Response: $response")
 
-            if (response.code() != 200) {
+            if (response.code() == 404) {
                 return@withContext null
+            }
+            if (response.code() != 200) {
+                throw LyricsFetchException("LrcApi HTTP ${response.code()}")
             }
 
             val body = response.body()?.string()
 
             body?.takeIf { it.isNotBlank() }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            Log.e("MediaBridge", "Error fetching lyrics from LrcApi", e)
+            throw LyricsFetchException("LrcApi request failed: ${e.message}", e)
         }
     }
 }

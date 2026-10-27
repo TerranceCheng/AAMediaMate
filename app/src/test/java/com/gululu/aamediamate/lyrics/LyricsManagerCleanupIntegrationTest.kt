@@ -5,6 +5,7 @@ import com.gululu.aamediamate.SettingsManager
 import com.gululu.aamediamate.data.LyricsCleanupField
 import com.gululu.aamediamate.data.LyricsCleanupRule
 import com.gululu.aamediamate.data.LyricsProviderConfig
+import com.gululu.aamediamate.lyrics.providers.LyricsFetchException
 import com.gululu.aamediamate.lyrics.providers.LyricsProvider
 import io.mockk.every
 import io.mockk.mockk
@@ -12,10 +13,15 @@ import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class LyricsManagerCleanupIntegrationTest {
 
     private lateinit var context: Context
@@ -57,6 +63,7 @@ class LyricsManagerCleanupIntegrationTest {
                 pattern = """(?i)\s*[•·-]?\s*Lossless\s*$"""
             )
         )
+        every { SettingsManager.getArtistNameReplacements(context) } returns emptyList()
         every { SettingsManager.getEnabledProvidersInOrder(context) } returns listOf(
             LyricsProviderConfig(
                 id = "test",
@@ -75,8 +82,39 @@ class LyricsManagerCleanupIntegrationTest {
             duration = "180"
         )
 
-        assertEquals("[00:01.00]Line", result)
+        assertEquals("[00:01.00]Line", result.lrc)
+        assertEquals(false, result.failed)
         assertEquals("Upbeat", capturedTitle)
         assertEquals("Green Day", capturedArtist)
+    }
+
+    @Test
+    fun `getLyricsLrt flags a provider failure so it can be retried`() = runTest {
+        val provider = object : LyricsProvider {
+            override suspend fun getLyricsLrc(
+                context: Context,
+                title: String,
+                artist: String,
+                duration: String
+            ): String? = throw LyricsFetchException("network down")
+        }
+
+        every { SettingsManager.getLyricsCleanupRules(context) } returns emptyList()
+        every { SettingsManager.getArtistNameReplacements(context) } returns emptyList()
+        every { SettingsManager.getEnabledProvidersInOrder(context) } returns listOf(
+            LyricsProviderConfig(
+                id = "test",
+                name = "Test",
+                descriptionRes = 0,
+                isEnabled = true,
+                priority = 1,
+                provider = provider
+            )
+        )
+
+        val result = LyricsManager.getLyricsLrt(context, "Upbeat", "Green Day", "180")
+
+        assertNull(result.lrc)
+        assertTrue(result.failed)
     }
 }

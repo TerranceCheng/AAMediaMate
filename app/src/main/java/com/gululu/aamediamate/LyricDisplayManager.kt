@@ -1,7 +1,9 @@
 package com.gululu.aamediamate
 
 import android.content.Context
+import android.media.session.PlaybackState
 import android.os.PowerManager
+import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
@@ -13,22 +15,25 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicLong
 
 class LyricDisplayManager(private val context: Context) {
 
     private val lyricsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile
     private var currentLyricsJob: Job? = null
     private val lyricsJobMutex = Mutex()
+    @Volatile
     private var lyricsUpdateJob: Job? = null
+    @Volatile
     private var currentMediaInfo: MediaInfo? = null
-
-    private val wakeLock: PowerManager.WakeLock by lazy {
-        (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AAMediaMate:LyricSync")
-            .apply { setReferenceCounted(false) }
-    }
+    private val startRequestId = AtomicLong(0L)
+    private var wakeLock: PowerManager.WakeLock? = null
+    private val WAKELOCK_TIMEOUT = 10 * 60 * 1000L  // 10 minutes
 
     fun start(mediaSession: MediaSessionCompat, info: MediaInfo) {
+        val requestId = startRequestId.incrementAndGet()
+
         val globalLyricsEnabled = SettingsManager.getLyricsEnabled(context)
         val appLyricsEnabled = SettingsManager.isAppLyricsEnabled(context, info.appPackageName)
         
@@ -43,19 +48,25 @@ class LyricDisplayManager(private val context: Context) {
         }
         
         Log.d("MediaBridge", "🎵 Starting lyrics for: ${info.appPackageName} - ${info.title} by ${info.artist}")
+        
+        // Immediately stop any previous lyric sync so old lyrics never outlive a track change.
+        // The new sync re-displays the currently active line as soon as it starts.
+        LyricSyncEngine.stop()
+        
         currentMediaInfo = info
-        if (!wakeLock.isHeld) wakeLock.acquire()
+        acquireWakeLock()
 
+        // Cancel any previous update jobs
+        lyricsUpdateJob?.cancel()
+        
         // Start observing lyric updates
-        lyricsUpdateJob?.cancel() // Cancel any previous observation
         lyricsUpdateJob = lyricsScope.launch {
             val observedMediaInfo = info // Capture the media info that started this observation
             LyricsRepository.lyricsUpdatedFlow.collectLatest { updatedKey ->
                 val currentKey = "${observedMediaInfo.title}_${observedMediaInfo.artist}"
-                if (updatedKey == currentKey) {
+                if (updatedKey == currentKey && currentMediaInfo === observedMediaInfo) {
                     Log.d("MediaBridge", "🎤 Lyrics for current song updated. Restarting lyric display.")
-                    // Stop internal components and restart to refresh with new lyrics
-                    stopInternal()
+                    // Restart to refresh with new lyrics (start() cancels the previous jobs)
                     start(mediaSession, observedMediaInfo)
                 }
             }
@@ -63,7 +74,10 @@ class LyricDisplayManager(private val context: Context) {
 
         lyricsScope.launch {
             lyricsJobMutex.withLock {
-                currentLyricsJob?.cancelAndJoin()
+                // A newer start()/stop() took over while this request was waiting for the lock.
+                if (requestId != startRequestId.get()) return@withLock
+
+                currentLyricsJob?.cancel()
                 currentLyricsJob = launch {
                     val lyrics = LyricCache.getOrFetchLyrics(
                         context,
@@ -72,37 +86,87 @@ class LyricDisplayManager(private val context: Context) {
                         info.duration.toString()
                     )
 
+                    // Fetching may outlive a track change; never start stale lyrics.
+                    if (requestId != startRequestId.get()) return@launch
+
                     if (lyrics.isEmpty()) {
                         Log.d("MediaBridge", "🚫 Lyrics not found: ${info.title}")
                         updateLyricLine(mediaSession, info, "", null) // Clear the displayed lyric
                         return@launch
                     }
 
-                    val currentPosition = MediaControllerManager.getActiveController(context)?.playbackState?.position ?: info.position
+                    val currentPosition = currentPlaybackPositionMs() ?: info.position
                     val offsetMs = SettingsManager.getLyricsTimingOffset(context).toLong()
 
-                    LyricSyncEngine.start(lyrics, currentPosition, offsetMs) { line, nextLine ->
+                    val engineJob = LyricSyncEngine.start(
+                        lyrics,
+                        currentPosition,
+                        offsetMs,
+                        positionProvider = { currentPlaybackPositionMs() }
+                    ) { line, nextLine ->
                         updateLyricLine(mediaSession, info, line, nextLine)
                     }
+
+                    // The track may have changed while this start was in flight; never leave
+                    // the previous track's lyrics running on top of the new one.
+                    if (requestId != startRequestId.get()) LyricSyncEngine.stopIfCurrent(engineJob)
                 }
             }
         }
     }
 
     fun stop() {
+        startRequestId.incrementAndGet()
         stopInternal()
         lyricsUpdateJob?.cancel()
         currentMediaInfo = null
-        if (wakeLock.isHeld) wakeLock.release()
+        releaseWakeLock()
     }
 
     private fun stopInternal() {
         LyricSyncEngine.stop()
-        runBlocking {
-            lyricsJobMutex.withLock {
-                currentLyricsJob?.cancel()
-                currentLyricsJob = null
+        val job = currentLyricsJob
+        currentLyricsJob = null
+        job?.cancel()
+    }
+
+    /**
+     * Playback position extrapolated to now. MediaController reports the position as of the last
+     * state update, so it must be advanced by the elapsed time when the player is running.
+     */
+    private fun currentPlaybackPositionMs(): Long? {
+        val state = MediaControllerManager.getActiveController(context)?.playbackState ?: return null
+        if (state.state != PlaybackState.STATE_PLAYING || state.lastPositionUpdateTime <= 0L || state.playbackSpeed <= 0f) {
+            return state.position
+        }
+        val elapsedMs = SystemClock.elapsedRealtime() - state.lastPositionUpdateTime
+        return state.position + (elapsedMs * state.playbackSpeed).toLong()
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld != true) {
+            try {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AAMediaMate:LyricSync").apply {
+                    setReferenceCounted(false)
+                    acquire(WAKELOCK_TIMEOUT)
+                }
+                Log.d("MediaBridge", "⚡ WakeLock acquired")
+            } catch (e: Exception) {
+                Log.e("MediaBridge", "Failed to acquire WakeLock", e)
             }
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+                Log.d("MediaBridge", "⚡ WakeLock released")
+            }
+            wakeLock = null
+        } catch (e: Exception) {
+            Log.e("MediaBridge", "Failed to release WakeLock", e)
         }
     }
 
@@ -116,8 +180,8 @@ class LyricDisplayManager(private val context: Context) {
         val showAlbumName = SettingsManager.getShowAlbumName(context)
         val showNextLyricLine = SettingsManager.getShowNextLyricLine(context)
 
+        // Blank lines are only used to clear the lyrics (e.g. no lyrics found).
         if (lyricLine.isNotBlank()) {
-            // When a lyric is displayed, use the lyric as the title
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, lyricLine)
 
             val artistText = if (showNextLyricLine) {

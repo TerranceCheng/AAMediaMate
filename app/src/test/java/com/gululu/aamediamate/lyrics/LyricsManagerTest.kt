@@ -2,6 +2,7 @@ package com.gululu.aamediamate.lyrics
 
 import android.content.Context
 import com.gululu.aamediamate.SettingsManager
+import com.gululu.aamediamate.models.RomanizeLanguage
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
@@ -24,6 +25,7 @@ class LyricsManagerTest {
         mockkObject(SettingsManager)
         // Mock the Simplified/Traditional conversion setting
         every { SettingsManager.getSimplifyEnabled(any()) } returns true
+        every { SettingsManager.getRomanizeEnabled(any()) } returns false
     }
 
     @Test
@@ -78,5 +80,29 @@ class LyricsManagerTest {
         """.trimIndent()
         val result = LyricsManager.parseLrc(mockContext, lrc)
         assertEquals(0, result.size)
+    }
+
+    @Test
+    fun testParseLrc_romanizesJapaneseWhenEnabled() {
+        every { SettingsManager.getRomanizeEnabled(any()) } returns true
+        every { SettingsManager.getRomanizeLanguages(any()) } returns setOf(RomanizeLanguage.JAPANESE)
+
+        val lrc = "[00:01.00]こんにちは"
+        val result = LyricsManager.parseLrc(mockContext, lrc)
+
+        assertEquals(1, result.size)
+        assertEquals("Konnichiha", result[0].text)
+    }
+
+    @Test
+    fun testParseLrc_doesNotRomanizeHanText() {
+        every { SettingsManager.getRomanizeEnabled(any()) } returns true
+        every { SettingsManager.getRomanizeLanguages(any()) } returns setOf(RomanizeLanguage.JAPANESE, RomanizeLanguage.KOREAN)
+
+        val lrc = "[00:01.00]我爱你"
+        val result = LyricsManager.parseLrc(mockContext, lrc)
+
+        assertEquals(1, result.size)
+        assertEquals("我爱你", result[0].text)
     }
 }

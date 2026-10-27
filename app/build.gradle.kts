@@ -66,6 +66,17 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        resources {
+            excludes += setOf(
+                "/META-INF/CONTRIBUTORS.md",
+                "/META-INF/LICENSE.md",
+                "/META-INF/LICENSE.txt",
+                "/META-INF/NOTICE.md",
+                "/META-INF/NOTICE.txt"
+            )
+        }
+    }
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
@@ -90,6 +101,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("com.github.houbb:opencc4j:1.6.0")
+    implementation("com.github.nicolas-raoul:jakaroma:1.0.0")
     implementation(libs.androidx.runtime.livedata)
     implementation("com.android.billingclient:billing-ktx:7.0.0")
     testImplementation(libs.junit)
